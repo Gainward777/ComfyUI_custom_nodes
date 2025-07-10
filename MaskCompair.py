@@ -27,7 +27,8 @@ class MaskCompair:
             },
         }
 
-    RETURN_TYPES = ("MASK",)
+    RETURN_TYPES = ("MASK", "MASK",)
+    RETURN_NAMES = ("final_mask", "scaled_inpainting_mask",)
     FUNCTION = "execute"
     CATEGORY = "Custom"
 
@@ -167,8 +168,9 @@ class MaskCompair:
         print(f"Inpainting bbox bottom center (scaled, relative to scaled_inpainting): ({scaled_anchor_x}, {scaled_anchor_y})")
         print(f"Calculated paste_x, paste_y for top-left of scaled_inpainting: ({paste_x}, {paste_y})")
         
-        # Копируем исходную маску
+        # Копируем исходную маску и создаем пустую для второй маски
         final_mask = source_np.copy()
+        inpainting_only_mask_np = np.zeros_like(source_np)
         
         # Определяем область вставки на final_mask и на scaled_inpainting
         # Координаты на final_mask
@@ -192,19 +194,25 @@ class MaskCompair:
             
             # Убедимся, что формы совпадают (важно из-за округлений/обрезок)
             if region_to_paste.shape == current_region_in_final.shape:
+                # Вставляем в итоговую маску (объединение)
                 final_mask[fm_start_y:fm_end_y, fm_start_x:fm_end_x] = \
                     np.logical_or(current_region_in_final, region_to_paste).astype(np.uint8)
+                # Вставляем в маску только для inpainting
+                inpainting_only_mask_np[fm_start_y:fm_end_y, fm_start_x:fm_end_x] = region_to_paste
             else:
                 print(f"Warning: Shape mismatch during paste. Region to paste: {region_to_paste.shape}, Target region: {current_region_in_final.shape}")
 
-        # Конвертируем обратно в тензор
+        # Конвертируем обратно в тензоры
         final_mask_tensor = torch.from_numpy(final_mask).float()
+        inpainting_only_tensor = torch.from_numpy(inpainting_only_mask_np).float()
 
-        # Убеждаемся, что возвращаем тензор нужной размерности
+        # Убеждаемся, что возвращаем тензоры нужной размерности
         if len(final_mask_tensor.shape) == 2:
             final_mask_tensor = final_mask_tensor.unsqueeze(0)
+        if len(inpainting_only_tensor.shape) == 2:
+            inpainting_only_tensor = inpainting_only_tensor.unsqueeze(0)
 
-        return (final_mask_tensor,)
+        return (final_mask_tensor, inpainting_only_tensor,)
 
 # Регистрация нода в ComfyUI
 NODE_CLASS_MAPPINGS = {

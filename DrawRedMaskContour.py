@@ -80,7 +80,7 @@ class DrawRedMaskContour:
         return (dilated > 0) if m.dtype == bool else dilated
         
 
-    def draw_contour(self, im, grown_mask, thickness=2, color=(0, 0, 255)):
+    def draw_contour(self, im, grown_mask, thickness=2, color=(255, 0, 0)):
         # --- снять batch: (B,H,W,C) -> (H,W,C), но запомнить, что он был ---
         had_batch = (im.ndim == 4 and im.shape[0] == 1)
         base = im[0] if had_batch else im

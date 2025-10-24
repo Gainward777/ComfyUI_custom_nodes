@@ -3,6 +3,8 @@ import torch
 from PIL import Image
 import cv2
 import torch
+import math
+import torch.nn.functional as F
 
 class DrawRedMaskContour:
 
@@ -36,75 +38,104 @@ class DrawRedMaskContour:
     FUNCTION = "execute"
     CATEGORY = "Custom"
 
-    def expand_mask(self, mask: np.ndarray, pixels: int, shape: str = "circle") -> np.ndarray:
+    def expand_mask(self, mask: torch.Tensor, pixels: int, shape: str = "circle") -> torch.Tensor:
         """
-        Увеличить бинарную маску на заданное число пикселей во все стороны.
-        mask  : 2D массив (bool, 0/1 или 0/255)
-        pixels: радиус расширения в пикселях (>=0)
-        shape : 'circle' | 'square' | 'cross' — форма ядра
-        Возвращает маску того же типа (bool -> bool, иначе uint8 0/255).
+        Увеличить бинарную маску на заданное число пикселей во все стороны (torch).
+        Вход: mask (1, H, W) float32 в [0,1]. Выход: (1, H, W) float32 в {0,1}.
         """
-        # Приводим маску к 2D (H, W): убираем возможные batch/канальную размерности
-        m = mask
-        if m.ndim > 2:
-            # частые варианты: (1, H, W) или (H, W, 1)
-            if m.ndim == 3 and m.shape[0] == 1:
-                m = m[0]
-            elif m.shape[-1] == 1:
-                m = m[..., 0]
-            else:
-                m = np.squeeze(m)
+        assert isinstance(mask, torch.Tensor), "mask must be torch.Tensor"
+        assert mask.ndim == 3 and mask.shape[0] == 1, "mask must be (1,H,W)"
 
         if pixels <= 0:
-            return m.copy()
+            return (mask > 0.5).to(dtype=torch.float32)
 
-        # Подбираем форму ядра
-        shape_map = {
-            "circle": cv2.MORPH_ELLIPSE,  # хороший «квази-круг»
-            "square": cv2.MORPH_RECT,
-            "cross":  cv2.MORPH_CROSS,
-        }
-        morph_shape = shape_map.get(shape, cv2.MORPH_ELLIPSE)
+        device = mask.device
+        dtype = torch.float32
+        k = 2 * pixels + 1
 
-        k = 2 * pixels + 1  # размер ядра
-        kernel = cv2.getStructuringElement(morph_shape, (k, k))  # ядро для дилатации
+        if shape == "square":
+            kernel = torch.ones((k, k), device=device, dtype=dtype)
+        elif shape == "cross":
+            kernel = torch.zeros((k, k), device=device, dtype=dtype)
+            c = pixels
+            kernel[c, :] = 1.0
+            kernel[:, c] = 1.0
+        else:  # circle
+            yy, xx = torch.meshgrid(
+                torch.arange(k, device=device),
+                torch.arange(k, device=device),
+                indexing='ij'
+            )
+            c = pixels
+            dist2 = (yy - c) ** 2 + (xx - c) ** 2
+            kernel = (dist2 <= (pixels ** 2)).to(dtype)
 
-        # Нормализуем тип входа
-        if m.dtype == bool:
-            src = m.astype(np.uint8) * 255
-        else:
-            src = (m > 0).astype(np.uint8) * 255
-
-        dilated = cv2.dilate(src, kernel, iterations=1)  # дилатация
-
-        return (dilated > 0) if m.dtype == bool else dilated
+        weight = kernel.unsqueeze(0).unsqueeze(0)  # (1,1,k,k)
+        padding = pixels
+        src = (mask > 0.5).to(dtype).unsqueeze(1)  # (1,1,H,W)
+        summed = F.conv2d(src, weight, padding=padding)  # (1,1,H,W)
+        dilated = (summed > 0).to(dtype)[:, 0, :, :]
+        return dilated
         
 
-    def draw_contour(self, im, grown_mask, thickness=2, color=(255, 0, 0)):
-        # --- снять batch: (B,H,W,C) -> (H,W,C), но запомнить, что он был ---
-        had_batch = (im.ndim == 4 and im.shape[0] == 1)
-        base = im[0] if had_batch else im
-    
-        # Маску привести к бинарной 8-битной: белый объект на чёрном фоне
-        if grown_mask.ndim == 3:
-            grown_mask_gray = cv2.cvtColor(grown_mask, cv2.COLOR_BGR2GRAY)
+    def draw_contour(self, im: torch.Tensor, grown_mask: torch.Tensor, thickness: int = 2, color=(0, 0, 255)):
+        """
+        Нарисовать контур по бинарной маске на изображении (torch).
+        Вход: im (1,H,W,3) float32 [0,1], grown_mask (1,H,W) float32 {0,1}.
+        Выход: (1,H,W,3) float32 [0,1].
+        """
+        assert isinstance(im, torch.Tensor) and isinstance(grown_mask, torch.Tensor), "inputs must be torch.Tensor"
+        assert im.ndim == 4 and im.shape[0] == 1 and im.shape[-1] == 3, "image must be (1,H,W,3)"
+        assert grown_mask.ndim == 3 and grown_mask.shape[0] == 1, "mask must be (1,H,W)"
+
+        device = im.device
+        dtype = im.dtype
+
+        # Бинаризуем маску
+        mask_bin = (grown_mask > 0.5).to(torch.float32)  # (1,H,W)
+
+        # Толщина: аппроксимируем контур кольцом из разности дилатации и эрозии
+        r = max(1, int(math.ceil(thickness / 2)))
+
+        def _disk(radius: int) -> torch.Tensor:
+            k = 2 * radius + 1
+            yy, xx = torch.meshgrid(
+                torch.arange(k, device=device),
+                torch.arange(k, device=device),
+                indexing='ij'
+            )
+            c = radius
+            dist2 = (yy - c) ** 2 + (xx - c) ** 2
+            return (dist2 <= (radius ** 2)).to(torch.float32)
+
+        def _dilate(x: torch.Tensor, radius: int) -> torch.Tensor:
+            k = _disk(radius).unsqueeze(0).unsqueeze(0)
+            s = F.conv2d(x.unsqueeze(1), k, padding=radius)
+            return (s > 0).to(torch.float32)[:, 0]
+
+        def _erode(x: torch.Tensor, radius: int) -> torch.Tensor:
+            k2 = _disk(radius)
+            k = k2.unsqueeze(0).unsqueeze(0)
+            s = F.conv2d(x.unsqueeze(1), k, padding=radius)
+            need = float(k2.sum().item())
+            return (s >= need - 1e-6).to(torch.float32)[:, 0]
+
+        dil = _dilate(mask_bin, r)
+        ero = _erode(mask_bin, max(1, r - 1))
+        edge = (dil > 0.5) & (ero <= 0.5)  # (1,H,W) bool
+
+        # Подготовим цвет: входной color предполагался BGR (как в OpenCV)
+        if isinstance(color, (tuple, list)) and len(color) >= 3:
+            bgr = torch.tensor([color[0], color[1], color[2]], device=device, dtype=torch.float32) / 255.0
+            rgb = bgr[[2, 1, 0]]  # BGR -> RGB
         else:
-            grown_mask_gray = grown_mask
-        grown_mask_gray = (grown_mask_gray > 0).astype(np.uint8) * 255
-    
-        # Контуры по бинарной маске
-        contours, _ = cv2.findContours(grown_mask_gray, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    
-        # Рисуем (OpenCV ждёт HxW[xC], массив должен быть «континуальным»)
-        image_with_contours = np.ascontiguousarray(base.copy())
-        draw_color = color if (image_with_contours.ndim == 3 and image_with_contours.shape[-1] in (3, 4)) else 255
-        cv2.drawContours(image_with_contours, contours, -1, draw_color, thickness)
-    
-        # --- вернуть batch обратно при необходимости: (H,W,C) -> (1,H,W,C) ---
-        if had_batch:
-            image_with_contours = image_with_contours[np.newaxis, ...]
-    
-        return image_with_contours
+            rgb = torch.tensor([1.0, 0.0, 0.0], device=device, dtype=torch.float32)  # fallback: красный
+        rgb = rgb.to(dtype).view(1, 1, 1, 3)
+
+        img = im.clone()
+        edge3 = edge.unsqueeze(-1)  # (1,H,W,1)
+        img = torch.where(edge3, rgb, img)
+        return img.clamp(0.0, 1.0)
 
 
 
@@ -113,17 +144,12 @@ class DrawRedMaskContour:
                 mask: torch.Tensor,
                 thickness: int, 
                 grow_by: int):
-
-            image = image.cpu().numpy()
-            mask = mask.cpu().numpy()
-            print()
-            print(image.shape)
-        
-            result_mask = self.expand_mask(mask, grow_by)
-            print(result_mask.shape)
-            print()
+                    
+            # Ожидаем: image (1,H,W,3) float32 [0,1], mask (1,H,W) float32 [0,1]
+            result_mask = self.expand_mask(mask, grow_by)           
             result_image = self.draw_contour(image, result_mask, thickness)
-            return (torch.from_numpy(result_image), torch.from_numpy(result_mask),)
+                    
+            return (result_image, result_mask,)
         
 
 # Регистрация нода в ComfyUI

@@ -5,6 +5,7 @@ from .CollageCombainer import CollageCombainer
 from .ImageCompair import ImageCompair
 from .InContextSizeCheck import InContextSizeCheck
 from .DrawRedMaskContour import DrawRedMaskContour
+from .FillMaskedWIthColor import FillMaskedWIthColor
 
 NODE_CLASS_MAPPINGS = {
     "InsertObjectNode": InsertObjectNode,
@@ -13,7 +14,8 @@ NODE_CLASS_MAPPINGS = {
     "ImageCompair": ImageCompair,
     "CollageCombainer": CollageCombainer,
     "InContextSizeCheck": InContextSizeCheck,
-    "DrawRedMaskContour": DrawRedMaskContour
+    "DrawRedMaskContour": DrawRedMaskContour,
+    "FillMaskedWIthColor": FillMaskedWIthColor
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
@@ -23,7 +25,8 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "ImageCompair": "ImageCompair",
     "CollageCombainer": "CollageCombainer",
     "InContextSizeCheck": "InContextSizeCheck",
-    "DrawRedMaskContour": "Draw Red Mask Contour"
+    "DrawRedMaskContour": "Draw Red Mask Contour",
+    "FillMaskedWIthColor": "FillMaskedWIthColor"
 }
 
 __all__ = ["NODE_CLASS_MAPPINGS", "NODE_DISPLAY_NAME_MAPPINGS"]

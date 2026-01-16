@@ -6,6 +6,7 @@ from .ImageCompair import ImageCompair
 from .InContextSizeCheck import InContextSizeCheck
 from .DrawRedMaskContour import DrawRedMaskContour
 from .FillMaskedWIthColor import FillMaskedWIthColor
+from .LoraLoaderFromURL import LoraLoaderFromURL
 
 NODE_CLASS_MAPPINGS = {
     "InsertObjectNode": InsertObjectNode,
@@ -15,7 +16,8 @@ NODE_CLASS_MAPPINGS = {
     "CollageCombainer": CollageCombainer,
     "InContextSizeCheck": InContextSizeCheck,
     "DrawRedMaskContour": DrawRedMaskContour,
-    "FillMaskedWIthColor": FillMaskedWIthColor
+    "FillMaskedWIthColor": FillMaskedWIthColor,
+    "LoraLoaderFromURL": LoraLoaderFromURL
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
@@ -26,7 +28,8 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "CollageCombainer": "CollageCombainer",
     "InContextSizeCheck": "InContextSizeCheck",
     "DrawRedMaskContour": "Draw Red Mask Contour",
-    "FillMaskedWIthColor": "FillMaskedWIthColor"
+    "FillMaskedWIthColor": "FillMaskedWIthColor",
+    "LoraLoaderFromURL": "Lora Loader From URL"
 }
 
 __all__ = ["NODE_CLASS_MAPPINGS", "NODE_DISPLAY_NAME_MAPPINGS"]
